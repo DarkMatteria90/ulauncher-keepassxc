@@ -4,6 +4,7 @@ Search KeePassXC password databases and copy passwords to the clipboard.
 import logging
 import os
 import sys
+import time
 from threading import Timer
 from typing import Optional
 import gi
@@ -38,17 +39,19 @@ logger = logging.getLogger(__name__)
 
 def activate_passphrase_window() -> None:
     """
-    Use wmctrl to bring the passphrase window to the top
-
-    Class name is set somewhere inside Gtk/Gdk to the "file name" + "program class"
-    "Program class" is set in below
+    Pollt das Fenster, bis es da ist (max 2 Sekunden), statt blind zu warten.
     """
-    try:
-        activate_window_by_class_name("main.py.KeePassXC Search")
-    except WmctrlNotFoundError:
-        logger.warning(
-            "wmctrl not installed, unable to activate passphrase entry window"
-        )
+    max_retries = 20
+    for _ in range(max_retries):
+        try:
+            activate_window_by_class_name("main.py.KeePassXC Search")
+        except WmctrlNotFoundError:
+            logger.warning("wmctrl fehlt. Tja.")
+            return
+        except Exception:
+            pass
+        
+        time.sleep(0.1)
 
 
 def current_script_path() -> str:
@@ -240,10 +243,7 @@ class ItemEnterEventListener(EventListener):
             return render.keepassxc_cli_error(exc.message)
         return DoNothingAction()
 
-    def read_verify_passphrase(self) -> None:
-        """
-        Create a passphrase entry window and get the passphrase, or not
-        """
+def read_verify_passphrase(self) -> None:
         win = GtkPassphraseEntryWindow(
             verify_passphrase_fn=self.keepassxc_db.verify_and_set_passphrase,
             icon_file=os.path.join(
@@ -251,8 +251,8 @@ class ItemEnterEventListener(EventListener):
             ),
         )
 
-        # Activate the passphrase entry window from a separate thread
-        Timer(0.5, activate_passphrase_window).start()
+        from threading import Thread
+        Thread(target=activate_passphrase_window).start()
 
         win.read_passphrase()
         if not self.keepassxc_db.is_passphrase_needed():
