@@ -51,6 +51,35 @@ class KeepassxcDatabase:
         self.inactivity_lock_timeout = 0
         self.lock_timer = None 
 
+    def initialize(self, path: str, inactivity_lock_timeout: int) -> None:
+        self.inactivity_lock_timeout = inactivity_lock_timeout
+        if not self.cli_checked:
+            if self.can_execute_cli():
+                self.cli_checked = True
+            else:
+                raise KeepassxcCliNotFoundError()
+
+        if path != self.path:
+            self.path = path
+            self.path_checked = False
+            self.passphrase = None
+            self._wipe_passphrase() # Das hier ist neu (Wiper)
+
+        if not self.path_checked:
+            if os.path.exists(self.path):
+                self.path_checked = True
+            else:
+                raise KeepassxcFileNotFoundError()
+            
+    def can_execute_cli(self) -> bool:
+        try:
+            subprocess.run(
+                [self.cli], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
+            )
+            return True
+        except OSError:
+            return False
+
     def _wipe_passphrase(self):
         """ Nuke it from orbit. """
         self.passphrase = None
