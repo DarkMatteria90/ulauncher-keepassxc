@@ -161,7 +161,7 @@ class KeywordQueryEventListener(EventListener):
 
         if extension.check_and_reset_active_entry(query_keyword, query_arg):
             details = self.keepassxc_db.get_entry_details(query_arg)
-            return render.active_entry(details)
+            return render.active_entry(query_arg, details)
 
         prev_query_arg = extension.check_and_reset_search_restore(query_arg)
         if prev_query_arg:
