@@ -9,7 +9,6 @@ from ulauncher.api.shared.action.BaseAction import BaseAction
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.DoNothingAction import DoNothingAction
 from ulauncher.api.shared.action.ExtensionCustomAction import ExtensionCustomAction
-# ActionList und CopyToClipboardAction brauchen wir nicht mehr (Secure Copy regelt)
 
 NO_SEARCH_RESULTS_ITEM = ExtensionResultItem(
     icon="images/not_found.svg",
@@ -123,45 +122,72 @@ def search_results(
 
 def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
     """
-    Show details of an entry and trigger secure copy on enter.
-    Updated to accept entry_name for the CLI call.
+    Show detailed actions for the entry.
+    Top priority: Typing helpers (Autotype).
+    Then: Copy actions.
     """
+    items = []
+
+    # --- 1. Autotype Section (Getrennt wie gewünscht) ---
+    
+    # Password Type Helper (Immer da, wenn PW existiert)
+    if details.get("Password"):
+        items.append(ExtensionSmallResultItem(
+            icon="images/key.svg", # Oder ein anderes Icon für "Keyboard"
+            name="Type Password",
+            on_enter=ExtensionCustomAction({
+                "action": "type_field",
+                "entry": entry_name,
+                "field": "Password"
+            }, keep_app_open=False)
+        ))
+
+    # Username Type Helper
+    if details.get("UserName"):
+        items.append(ExtensionSmallResultItem(
+            icon="images/key.svg",
+            name=f"Type Username: {details['UserName']}",
+            on_enter=ExtensionCustomAction({
+                "action": "type_field",
+                "entry": entry_name,
+                "field": "UserName"
+            }, keep_app_open=False)
+        ))
+
+    # URL Type Helper
+    if details.get("URL"):
+        items.append(ExtensionSmallResultItem(
+            icon="images/key.svg",
+            name=f"Type URL: {details['URL']}",
+            on_enter=ExtensionCustomAction({
+                "action": "type_field",
+                "entry": entry_name,
+                "field": "URL"
+            }, keep_app_open=False)
+        ))
+        
+    # --- 2. Copy Section (Secure Copy) ---
     attrs = [
         ("Password", "password"),
         ("UserName", "username"),
         ("URL", "URL"),
         ("Notes", "notes"),
     ]
-    items = []
-    # ---Der Autotype Button (Ganz oben) ---
-    items.append(
-        ExtensionResultItem(
-            icon="images/key.svg", # Oder ein anderes Icon, wenn du hast
-            name="Perform Autotype",
-            description="Type username and password into previous window",
-            on_enter=ExtensionCustomAction({
-                "action": "autotype",
-                "entry": entry_name
-            }, keep_app_open=False) # Wichtig: App muss zugehen!
-        )
-    )
-    # --------------------------------------------
+    
     for attr, attr_nice in attrs:
         val = details.get(attr, "")
         if val:
-            # Wir rufen jetzt unsere Custom Action auf.
-            # extension.py kümmert sich um den CLI-Aufruf und die Notification.
             action = ExtensionCustomAction({
                 "action": "secure_copy",
                 "entry": entry_name,
-                "attr": attr # Wir übergeben den echten Attribut-Namen (z.B. "UserName")
+                "attr": attr
             }, keep_app_open=False)
 
             if attr == "Password":
                 items.append(
                     ExtensionSmallResultItem(
                         icon="images/copy.svg",
-                        name="Copy password to the clipboard",
+                        name="Copy password to clipboard",
                         on_enter=action,
                     )
                 )
@@ -170,8 +196,9 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
                     ExtensionResultItem(
                         icon="images/copy.svg",
                         name="{}: {}".format(attr_nice.capitalize(), val),
-                        description="Copy {} to the clipboard (Secure Copy)".format(attr_nice),
+                        description="Copy {} to clipboard (Secure)".format(attr_nice),
                         on_enter=action,
                     )
                 )
+
     return RenderResultListAction(items)
