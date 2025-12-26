@@ -52,8 +52,8 @@ class GtkPassphraseEntryWindow(Gtk.Window):
         Includes safeguards against double-submission and UI freezing.
         """
         # Safety: Prevent double-execution if user mashes Enter
-        if not self.entry.get_is_focusable() or not self.entry.get_sensitive():
-             return 
+        if not self.entry.get_sensitive():
+                    return
         
         # Lock input to indicate "Working..."
         self.entry.set_sensitive(False) 
