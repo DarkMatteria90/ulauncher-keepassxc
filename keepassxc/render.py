@@ -1,5 +1,5 @@
 """
-Functions that deal with rendering Ulauncher result items
+Functions that deal with rendering Ulauncher result items.
 """
 from typing import List, Dict
 from ulauncher.api.shared.item.ResultItem import ResultItem
@@ -96,6 +96,7 @@ def ask_to_enter_query() -> BaseAction:
 def search_results(
     keyword: str, arg: str, entries: List[str], max_items: int
 ) -> BaseAction:
+    """ Builds the list of search results """
     items = []
     if not entries:
         items.append(NO_SEARCH_RESULTS_ITEM)
@@ -122,13 +123,16 @@ def search_results(
 
 def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
     """
-    Show detailed actions including TOTP if available.
+    Renders detailed actions for a specific entry.
+    Priority: 
+    1. Autotype Helpers (Type Password, Type TOTP...)
+    2. Secure Copy Actions
     """
     items = []
 
-    # --- 1. Autotype / Type Helpers ---
+    # --- SECTION 1: AUTOTYPE HELPERS (Use xdotool) ---
     
-    # Password (immer nützlich)
+    # Type Password
     if details.get("Password"):
         items.append(ExtensionSmallResultItem(
             icon="images/key.svg",
@@ -140,7 +144,7 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
 
-    # TOTP (Highlight! Zeigt den Code direkt an)
+    # Type TOTP (Shows the code directly in the name for convenience)
     if details.get("TOTP"):
         items.append(ExtensionSmallResultItem(
             icon="images/key.svg",
@@ -153,7 +157,7 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
 
-    # Username
+    # Type Username
     if details.get("UserName"):
         items.append(ExtensionSmallResultItem(
             icon="images/key.svg",
@@ -165,7 +169,7 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
 
-    # URL
+    # Type URL
     if details.get("URL"):
         items.append(ExtensionSmallResultItem(
             icon="images/key.svg",
@@ -177,9 +181,9 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
         
-    # --- 2. Copy Actions (Secure Copy) ---
+    # --- SECTION 2: COPY ACTIONS (Secure Copy) ---
     
-    # TOTP Copy Button
+    # Copy TOTP
     if details.get("TOTP"):
         items.append(ExtensionResultItem(
             icon="images/copy.svg",
@@ -202,6 +206,7 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
     for attr, attr_nice in attrs:
         val = details.get(attr, "")
         if val:
+            # We use ExtensionCustomAction to route to 'secure_copy' in extension.py
             action = ExtensionCustomAction({
                 "action": "secure_copy",
                 "entry": entry_name,

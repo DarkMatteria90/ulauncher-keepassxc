@@ -1,11 +1,11 @@
 """
-Search KeePassXC password databases and copy passwords to the clipboard.
+Search KeePassXC password databases, perform autotype, and copy passwords.
 """
 import logging
 import os
 import sys
 import time
-import subprocess  # Wichtig für xdotool
+import subprocess
 from threading import Thread
 from typing import Optional
 import gi
@@ -40,36 +40,41 @@ logger = logging.getLogger(__name__)
 
 def activate_passphrase_window() -> None:
     """
-    Use wmctrl to bring the passphrase window to the top.
-    Polls for the window to appear to avoid race conditions.
+    Attempts to activate the passphrase window.
+    Uses polling (loop) instead of a fixed sleep to handle race conditions better.
     """
     max_retries = 20
     for _ in range(max_retries):
         try:
             activate_window_by_class_name("main.py.KeePassXC Search")
+            # If successful, we could break, but sometimes it takes a split second more to fully focus
         except WmctrlNotFoundError:
             logger.warning(
                 "wmctrl not installed, unable to activate passphrase entry window"
             )
             return
         except Exception:
-            pass
+            pass # Window not found yet
         
         time.sleep(0.1)
 
 
 def perform_type_text(text: str) -> None:
     """
-    Waits for Ulauncher to close, then types the text using xdotool.
-    Uses stdin for safety.
+    Simulates keystrokes using xdotool.
+    
+    Security:
+    - Waits for Ulauncher to close.
+    - Uses STDIN pipe to xdotool to avoid leaking credentials in process list (ps aux).
+    - Clears modifiers to avoid stuck keys (like Shift or Alt).
     """
-    time.sleep(0.5) # Warte auf Fokus-Wechsel
+    time.sleep(0.5) # Wait for Ulauncher window to disappear
 
     if not text:
         return
 
     try:
-        # --clearmodifiers verhindert, dass 'Shift' oder 'Alt' hängen bleiben
+        # Popen allows us to pipe the text securely
         proc = subprocess.Popen(
             ["xdotool", "type", "--clearmodifiers", "--file", "-"], 
             stdin=subprocess.PIPE
@@ -77,14 +82,9 @@ def perform_type_text(text: str) -> None:
         proc.communicate(input=text.encode('utf-8'))
     except Exception as e:
         logger.error(f"Typing failed: {e}")
-        # Notfalls via Notify, falls xdotool fehlt
-        # Notify.Notification.new(f"Typing failed: {e}").show()
 
 
 def current_script_path() -> str:
-    """
-    Return path to where the currently executing script is located
-    """
     return os.path.abspath(os.path.dirname(sys.argv[0]))
 
 
@@ -112,6 +112,7 @@ class KeepassxcExtension(Extension):
     def get_inactivity_lock_timeout(self) -> int:
         return int(self.preferences["inactivity-lock-timeout"])
 
+    # ... (Helper methods for state management remain unchanged) ...
     def set_active_entry(self, keyword: str, entry: str) -> None:
         self.active_entry = (keyword, entry)
 
@@ -146,7 +147,7 @@ class KeepassxcExtension(Extension):
 
 
 class KeywordQueryEventListener(EventListener):
-    """ KeywordQueryEventListener class used to manage user input """
+    """ Handles the user typing queries """
 
     def __init__(self, keepassxc_db):
         self.keepassxc_db = keepassxc_db
@@ -181,13 +182,13 @@ class KeywordQueryEventListener(EventListener):
                 )
             return render.ask_to_enter_query()
 
+        # If user selected an entry, show details (Autotype/Copy buttons)
         if extension.check_and_reset_active_entry(query_keyword, query_arg):
-            # Details holen, damit render.py die Felder kennt
             try:
                 details = self.keepassxc_db.get_entry_details(query_arg)
+                # FIX: Pass query_arg (entry name) AND details to render
                 return render.active_entry(query_arg, details)
             except Exception:
-                 # Fallback falls DB locked oder Fehler
                  return render.keepassxc_cli_error("Could not fetch details")
 
         prev_query_arg = extension.check_and_reset_search_restore(query_arg)
@@ -201,7 +202,7 @@ class KeywordQueryEventListener(EventListener):
 
 
 class ItemEnterEventListener(EventListener):
-    """ KeywordQueryEventListener class used to manage user input """
+    """ Handles actions when user presses Enter on an item """
 
     def __init__(self, keepassxc_db):
         self.keepassxc_db = keepassxc_db
@@ -211,16 +212,18 @@ class ItemEnterEventListener(EventListener):
             data = event.get_data()
             action = data.get("action", None)
 
-            # --- TYPE FIELD LOGIK (Einzelne Felder tippen) ---
+            # --- ACTION: Autotype specific field ---
             if action == "type_field":
                 entry = data.get("entry")
-                field_key = data.get("field") # 'Password', 'UserName', 'URL'
+                field_key = data.get("field") # 'Password', 'UserName', 'URL', 'TOTP'
                 
                 try:
+                    # Fetch fresh details to be safe
                     details = self.keepassxc_db.get_entry_details(entry)
                     val = details.get(field_key, "")
                     
                     if val:
+                        # Run in background to not block Ulauncher
                         Thread(target=perform_type_text, args=(val,)).start()
                         return DoNothingAction()
                     else:
@@ -230,19 +233,22 @@ class ItemEnterEventListener(EventListener):
                 except Exception as e:
                     Notify.Notification.new(f"Autotype failed: {e}").show()
                     return DoNothingAction()
-            # ------------------------------------------------
 
+            # --- ACTION: Secure Clipboard Copy ---
             if action == "secure_copy":
                 entry = data.get("entry")
                 attr = data.get("attr", "password")
+                # Trigger the secure copy (keepassxc-cli clip)
                 self.keepassxc_db.copy_to_clipboard(entry, attr, timeout=20)
                 Notify.Notification.new(f"{attr.capitalize()} copied. Clears in 20s.").show()
                 return DoNothingAction()
 
+            # --- ACTION: Read Passphrase ---
             if action == "read_passphrase":
                 self.read_verify_passphrase()
                 return DoNothingAction()
 
+            # --- ACTION: Activate Entry (go into details) ---
             if action == "activate_entry":
                 keyword = data.get("keyword", None)
                 entry = data.get("entry", None)
@@ -252,6 +258,7 @@ class ItemEnterEventListener(EventListener):
                 extension.add_recent_active_entry(entry)
                 return SetUserQueryAction("{} {}".format(keyword, entry))
 
+            # --- ACTION: Simple Notification ---
             if action == "show_notification":
                 Notify.Notification.new(data.get("summary")).show()
 
@@ -265,7 +272,8 @@ class ItemEnterEventListener(EventListener):
 
     def read_verify_passphrase(self) -> None:
         """
-        Create a passphrase entry window and get the passphrase, or not
+        Launches the GTK window to enter the master password.
+        Uses a separate thread to ensure the window gets focus.
         """
         win = GtkPassphraseEntryWindow(
             verify_passphrase_fn=self.keepassxc_db.verify_and_set_passphrase,
@@ -282,7 +290,6 @@ class ItemEnterEventListener(EventListener):
 
 class PreferencesUpdateEventListener(EventListener):
     """ Handle preferences updates """
-
     def __init__(self, keepassxc_db):
         self.keepassxc_db = keepassxc_db
 

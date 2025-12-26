@@ -1,112 +1,101 @@
 """
-Simple passphrase entry Gtk window
+GTK Window for entering the KeepassXC passphrase.
+Includes fixes for UI freezing and double-submission issues.
 """
-from typing import Optional, Callable
 import gi
-
 gi.require_version("Gtk", "3.0")
-# pylint: disable=wrong-import-order
-from gi.repository import Gtk, Gdk  # noqa: E402
-
+# pylint: disable=wrong-import-position
+from gi.repository import Gtk, GdkPixbuf
 
 class GtkPassphraseEntryWindow(Gtk.Window):
     """
-    Gtk window with one masked text input field
+    A modal window that asks the user for a password.
     """
 
-    def __init__(
-        self,
-        verify_passphrase_fn: Optional[Callable[[str], bool]] = None,
-        icon_file: Optional[str] = None,
-    ) -> None:
-        Gtk.Window.__init__(self, title="Enter Passphrase")
-
+    def __init__(self, verify_passphrase_fn=None, icon_file=None):
+        super(GtkPassphraseEntryWindow, self).__init__(title="Enter passphrase")
         self.verify_passphrase_fn = verify_passphrase_fn
-
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        self.add(vbox)
-
-        self.passphrase = ""
-        self.entry = Gtk.Entry()
-        self.entry.set_text("")
-        self.entry.set_editable(True)
-        self.entry.set_visibility(False)
-        self.entry.props.max_width_chars = 50
-        self.entry.connect("activate", self.enter_pressed)
-        self.entry.connect("key-press-event", self.key_pressed)
-        vbox.pack_start(self.entry, True, True, 0)
-
-        self.label = Gtk.Label("")
-        vbox.pack_start(self.label, True, True, 0)
+        self.passphrase = None
 
         self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_border_width(10)
         self.set_resizable(False)
-        if icon_file:
-            self.set_default_icon_from_file(icon_file)
+        self.set_keep_above(True)  # Try to keep on top
 
-    def close_window(self) -> None:
+        if icon_file:
+            self.set_icon(GdkPixbuf.Pixbuf.new_from_file(icon_file))
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.add(vbox)
+
+        self.label = Gtk.Label(label="Please enter passphrase to unlock the database:")
+        vbox.pack_start(self.label, True, True, 0)
+
+        self.entry = Gtk.Entry()
+        self.entry.set_visibility(False)  # Hide characters (Password mode)
+        self.entry.connect("activate", self.enter_pressed)
+        vbox.pack_start(self.entry, True, True, 0)
+
+        self.connect("destroy", Gtk.main_quit)
+        self.show_all()
+
+    def read_passphrase(self):
         """
-        Stop it
+        Starts the GTK main loop and blocks until the window is closed.
         """
-        self.destroy()
-        Gtk.main_quit()
+        Gtk.main()
+        return self.passphrase
 
     def enter_pressed(self, entry: Gtk.Entry) -> None:
         """
-        When Enter pressed, verify the passphrase (if able),
-        close the window and return entered passphrase
+        Handle the Enter key event.
+        Includes safeguards against double-submission and UI freezing.
         """
+        # Safety: Prevent double-execution if user mashes Enter
+        if not self.entry.get_is_focusable() or not self.entry.get_sensitive():
+             return 
+        
+        # Lock input to indicate "Working..."
+        self.entry.set_sensitive(False) 
+
         passphrase = entry.get_text()
+        
         if self.verify_passphrase_fn:
+            # Update UI to show we are verifying
             self.show_verifying_passphrase()
+            
+            # This is the blocking call to keepassxc-cli
             if self.verify_passphrase_fn(passphrase):
                 self.passphrase = passphrase
                 self.close_window()
             else:
+                # IMPORTANT: If verification fails, re-enable the input!
+                self.entry.set_sensitive(True) 
+                self.entry.grab_focus()
                 self.show_incorrect_passphrase()
         else:
+            # No verification function provided (should not happen in this ext)
             self.passphrase = passphrase
-            self.close_window()
-
-    def key_pressed(self, _, event) -> None:
-        """
-        When Esc pressed, close the window
-        """
-        if event.hardware_keycode == 9:
-            self.passphrase = ""
             self.close_window()
 
     def show_verifying_passphrase(self) -> None:
         """
-        Tell the user that we are busy verifying the passphrase
+        Updates label and forces a UI redraw to prevent "frozen" look.
         """
-        self.label.set_text("Verifying passphrase...")
-        # --- FIX START ---
+        self.label.set_markup("Verifying passphrase...")
+        
+        # Force GTK to process pending events (like redrawing the label)
+        # BEFORE we block the thread with the CLI call.
         while Gtk.events_pending():
             Gtk.main_iteration()
-        # --- FIX END ---
 
     def show_incorrect_passphrase(self) -> None:
         """
-        Tell the user that the passphrase failed verification
+        Updates label to show error state.
         """
         self.label.set_markup(
-            '<span foreground="red">Incorrect passphrase. Please try again.</span>'
+            '<span foreground="red">Incorrect passphrase, please try again:</span>'
         )
-        self.entry.set_text("")
 
-    def read_passphrase(self) -> str:
-        """
-        Show the window and wait for user to enter passphrase
-        """
-        self.connect("destroy", Gtk.main_quit)
-        self.show_all()
-        Gtk.main()
-        return self.passphrase
-
-
-if __name__ == "__main__":
-    Gdk.set_program_class("KeePassXC search")
-    # pylint: disable=invalid-name
-    window = GtkPassphraseEntryWindow(icon_file="images/keepassxc-search.svg")
-    print(window.read_passphrase())
+    def close_window(self) -> None:
+        self.destroy()
