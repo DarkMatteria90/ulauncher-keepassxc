@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from threading import Timer
+from threading import Thread
 from typing import Optional
 import gi
 from ulauncher.api.client.Extension import Extension
