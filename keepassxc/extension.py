@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import time  # <--- FIX: Added
+import subprocess
 from threading import Thread # <--- FIX: Added (statt Timer für window activation)
 from typing import Optional
 import gi
@@ -58,6 +59,30 @@ def activate_passphrase_window() -> None:
         
         time.sleep(0.1)
 
+def perform_autotype(username: str, password: str) -> None:
+    """
+    Waits for Ulauncher to close, then types credentials using xdotool.
+    Uses stdin for password to avoid leaking it in process list (ps aux).
+    """
+
+    time.sleep(0.5)
+
+    if username:
+        subprocess.run(["xdotool", "type", "--clearmodifiers", username], check=False)
+    
+    subprocess.run(["xdotool", "key", "Tab"], check=False)
+
+    if password:
+        try:
+            proc = subprocess.Popen(
+                ["xdotool", "type", "--clearmodifiers", "--file", "-"], 
+                stdin=subprocess.PIPE
+            )
+            proc.communicate(input=password.encode('utf-8'))
+        except Exception as e:
+            logger.error(f"Autotype failed: {e}")
+
+    subprocess.run(["xdotool", "key", "Return"], check=False)
 
 def current_script_path() -> str:
     """
@@ -183,6 +208,26 @@ class ItemEnterEventListener(EventListener):
         try:
             data = event.get_data()
             action = data.get("action", None)
+
+            # --- AUTOTYPE LOGIK ---
+            if action == "autotype":
+                entry = data.get("entry")
+                # Wir holen die Details frisch aus der DB (sicherer als sie im Event rumzureichen)
+                try:
+                    details = self.keepassxc_db.get_entry_details(entry)
+                    u = details.get("UserName", "")
+                    p = details.get("Password", "")
+                    
+                    # Ab in den Hintergrund-Thread damit, sonst blockiert Ulauncher
+                    Thread(target=perform_autotype, args=(u, p)).start()
+                    
+                    # Ulauncher schließen
+                    return DoNothingAction()
+                    
+                except Exception as e:
+                    Notify.Notification.new(f"Autotype failed: {e}").show()
+                    return DoNothingAction()
+            # ----------------------
 
             # --- NEU START ---
             if action == "secure_copy":

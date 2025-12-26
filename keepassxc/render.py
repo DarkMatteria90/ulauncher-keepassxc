@@ -133,6 +133,19 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
         ("Notes", "notes"),
     ]
     items = []
+    # ---Der Autotype Button (Ganz oben) ---
+    items.append(
+        ExtensionResultItem(
+            icon="images/key.svg", # Oder ein anderes Icon, wenn du hast
+            name="Perform Autotype",
+            description="Type username and password into previous window",
+            on_enter=ExtensionCustomAction({
+                "action": "autotype",
+                "entry": entry_name
+            }, keep_app_open=False) # Wichtig: App muss zugehen!
+        )
+    )
+    # --------------------------------------------
     for attr, attr_nice in attrs:
         val = details.get(attr, "")
         if val:
