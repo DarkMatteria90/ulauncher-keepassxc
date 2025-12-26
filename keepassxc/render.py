@@ -122,18 +122,16 @@ def search_results(
 
 def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
     """
-    Show detailed actions for the entry.
-    Top priority: Typing helpers (Autotype).
-    Then: Copy actions.
+    Show detailed actions including TOTP if available.
     """
     items = []
 
-    # --- 1. Autotype Section (Getrennt wie gewünscht) ---
+    # --- 1. Autotype / Type Helpers ---
     
-    # Password Type Helper (Immer da, wenn PW existiert)
+    # Password (immer nützlich)
     if details.get("Password"):
         items.append(ExtensionSmallResultItem(
-            icon="images/key.svg", # Oder ein anderes Icon für "Keyboard"
+            icon="images/key.svg",
             name="Type Password",
             on_enter=ExtensionCustomAction({
                 "action": "type_field",
@@ -142,7 +140,20 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
 
-    # Username Type Helper
+    # TOTP (Highlight! Zeigt den Code direkt an)
+    if details.get("TOTP"):
+        items.append(ExtensionSmallResultItem(
+            icon="images/key.svg",
+            name=f"Type TOTP: {details['TOTP']}",
+            description="Types the current 2FA code",
+            on_enter=ExtensionCustomAction({
+                "action": "type_field",
+                "entry": entry_name,
+                "field": "TOTP"
+            }, keep_app_open=False)
+        ))
+
+    # Username
     if details.get("UserName"):
         items.append(ExtensionSmallResultItem(
             icon="images/key.svg",
@@ -154,7 +165,7 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
 
-    # URL Type Helper
+    # URL
     if details.get("URL"):
         items.append(ExtensionSmallResultItem(
             icon="images/key.svg",
@@ -166,7 +177,21 @@ def active_entry(entry_name: str, details: Dict[str, str]) -> BaseAction:
             }, keep_app_open=False)
         ))
         
-    # --- 2. Copy Section (Secure Copy) ---
+    # --- 2. Copy Actions (Secure Copy) ---
+    
+    # TOTP Copy Button
+    if details.get("TOTP"):
+        items.append(ExtensionResultItem(
+            icon="images/copy.svg",
+            name="Copy TOTP to clipboard",
+            description="Generates fresh code and clears clipboard after timeout",
+            on_enter=ExtensionCustomAction({
+                "action": "secure_copy",
+                "entry": entry_name,
+                "attr": "totp"
+            }, keep_app_open=False)
+        ))
+
     attrs = [
         ("Password", "password"),
         ("UserName", "username"),
