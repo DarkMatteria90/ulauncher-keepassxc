@@ -81,6 +81,10 @@ class GtkPassphraseEntryWindow(Gtk.Window):
         Tell the user that we are busy verifying the passphrase
         """
         self.label.set_text("Verifying passphrase...")
+        # --- FIX START ---
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+        # --- FIX END ---
 
     def show_incorrect_passphrase(self) -> None:
         """
