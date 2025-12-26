@@ -148,3 +148,28 @@ class KeepassxcDatabase:
                 pass 
 
         return (stderr, stdout)
+    
+    def copy_to_clipboard(self, entry: str, attr: str = "password", timeout: int = 10) -> None:
+        """
+        Uses keepassxc-cli clip to copy securely and clear after timeout.
+        Runs in background (Popen) so we don't freeze the UI.
+        """
+        if self.is_passphrase_needed():
+             # Sollte eigentlich nicht passieren, da wir vorher prüfen,
+             # aber sicher ist sicher.
+             return
+
+        cmd = [self.cli, "clip", self.path, entry, str(timeout)]
+        
+        # Wenn es nicht das Passwort ist, müssen wir das Attribut angeben
+        if attr.lower() != "password":
+            cmd.extend(["-a", attr])
+
+        # Wir feuern den Prozess ab und vergessen ihn (Fire & Forget).
+        # keepassxc-cli kümmert sich um das Warten und Löschen.
+        subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL, # Wir wollen keinen Output
+            stderr=subprocess.DEVNULL, 
+        ).communicate(input=bytes(self.passphrase, "utf-8"))

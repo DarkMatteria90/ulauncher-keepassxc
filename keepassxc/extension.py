@@ -183,6 +183,17 @@ class ItemEnterEventListener(EventListener):
         try:
             data = event.get_data()
             action = data.get("action", None)
+
+            # --- NEU START ---
+            if action == "secure_copy":
+                entry = data.get("entry")
+                attr = data.get("attr", "password")
+                # Wir nehmen 10s oder was in den Settings steht
+                self.keepassxc_db.copy_to_clipboard(entry, attr, timeout=20)
+                Notify.Notification.new(f"{attr.capitalize()} copied. Clears in 20s.").show()
+                return DoNothingAction()
+            # --- NEU ENDE ---
+
             if action == "read_passphrase":
                 self.read_verify_passphrase()
                 return DoNothingAction()
