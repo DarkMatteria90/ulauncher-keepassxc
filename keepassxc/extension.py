@@ -4,9 +4,8 @@ Search KeePassXC password databases and copy passwords to the clipboard.
 import logging
 import os
 import sys
-import time
-from threading import Timer
-from threading import Thread
+import time  # <--- FIX: Added
+from threading import Thread # <--- FIX: Added (statt Timer für window activation)
 from typing import Optional
 import gi
 from ulauncher.api.client.Extension import Extension
@@ -40,17 +39,22 @@ logger = logging.getLogger(__name__)
 
 def activate_passphrase_window() -> None:
     """
-    Pollt das Fenster, bis es da ist (max 2 Sekunden), statt blind zu warten.
+    Use wmctrl to bring the passphrase window to the top.
+    Polls for the window to appear to avoid race conditions.
     """
     max_retries = 20
     for _ in range(max_retries):
         try:
+            # Versuch das Fenster zu finden
             activate_window_by_class_name("main.py.KeePassXC Search")
+            # Wenn erfolgreich (kein Fehler), brechen wir ab (oder machen weiter, sicherheitshalber)
         except WmctrlNotFoundError:
-            logger.warning("wmctrl fehlt. Tja.")
+            logger.warning(
+                "wmctrl not installed, unable to activate passphrase entry window"
+            )
             return
         except Exception:
-            pass
+            pass # Fenster noch nicht da, wir warten kurz
         
         time.sleep(0.1)
 
@@ -65,9 +69,6 @@ def current_script_path() -> str:
 class KeepassxcExtension(Extension):
     """ Extension class, coordinates everything """
 
-    # REORG: break up into Keepassxc and KeepassxcExtension, like NotesNv one
-    # store instances of keepassxc_db in a dict keyed by "database_id"
-    # that's tied to preferences - allows for multidb support
     def __init__(self):
         super(KeepassxcExtension, self).__init__()
         self.keepassxc_db = KeepassxcDatabase()
@@ -81,51 +82,26 @@ class KeepassxcExtension(Extension):
         self.recent_active_entries = []
 
     def get_db_path(self) -> str:
-        """
-        Normalized and expanded path to the database file
-        """
         return os.path.expanduser(self.preferences["database-path"])
 
     def get_max_result_items(self) -> int:
-        """
-        Maximum number of search results to show on screen
-        """
         return int(self.preferences["max-results"])
 
     def get_inactivity_lock_timeout(self) -> int:
-        """
-        How long to wait to lock the database after last user interaction
-        """
         return int(self.preferences["inactivity-lock-timeout"])
 
     def set_active_entry(self, keyword: str, entry: str) -> None:
-        """
-        Save the search keyword and full name of the entry that user activated
-        by selecting one of the search results
-        """
         self.active_entry = (keyword, entry)
 
     def check_and_reset_active_entry(self, keyword: str, entry: str) -> bool:
-        """
-        Whether the search query is actually a request to render
-        the active entry that was saved just before
-        """
         is_match = self.active_entry == (keyword, entry)
         self.active_entry = None
         return is_match
 
     def set_active_entry_search_restore(self, entry: str, query_arg: str) -> None:
-        """
-        Save the search arg that we should return to if given entry
-        is being erased - allows user to back out of an active entry
-        by pressing Backspace
-        """
         self.active_entry_search_restore = (entry, query_arg)
 
     def check_and_reset_search_restore(self, query_arg: str) -> Optional[str]:
-        """
-        Whether to re-run a search query after backing out from an active entry
-        """
         if self.active_entry_search_restore:
             (prev_active_entry, prev_query_arg) = self.active_entry_search_restore
             self.active_entry_search_restore = None
@@ -134,10 +110,6 @@ class KeepassxcExtension(Extension):
         return None
 
     def add_recent_active_entry(self, entry: str) -> None:
-        """
-        Add an entry to the head of the recent active entries list.
-        Make sure the entry appears in the list only once.
-        """
         if entry in self.recent_active_entries:
             idx = self.recent_active_entries.index(entry)
             del self.recent_active_entries[idx]
@@ -146,21 +118,13 @@ class KeepassxcExtension(Extension):
         self.recent_active_entries = self.recent_active_entries[:max_items]
 
     def database_path_changed(self) -> None:
-        """
-        We are now using a different database file - do something about that.
-        """
-        # Shouldn't be showing recent entries from another database
         self.recent_active_entries = []
-
-        # Active entry and old search no longer valid
         self.active_entry = None
         self.active_entry_search_restore = None
 
 
 class KeywordQueryEventListener(EventListener):
     """ KeywordQueryEventListener class used to manage user input """
-
-    # REORG: move these into Keepassxc
 
     def __init__(self, keepassxc_db):
         self.keepassxc_db = keepassxc_db
@@ -182,9 +146,6 @@ class KeywordQueryEventListener(EventListener):
             return render.keepassxc_cli_error(exc.message)
 
     def process_keyword_query(self, event, extension) -> BaseAction:
-        """
-        Handle a search query entered by user
-        """
         query_keyword = event.get_keyword()
         query_arg = event.get_argument()
 
@@ -218,7 +179,6 @@ class ItemEnterEventListener(EventListener):
     def __init__(self, keepassxc_db):
         self.keepassxc_db = keepassxc_db
 
-    # FUTURE replace with CallObjectMethodEventListener
     def on_event(self, event, extension) -> BaseAction:
         try:
             data = event.get_data()
@@ -244,7 +204,10 @@ class ItemEnterEventListener(EventListener):
             return render.keepassxc_cli_error(exc.message)
         return DoNothingAction()
 
-def read_verify_passphrase(self) -> None:
+    def read_verify_passphrase(self) -> None:
+        """
+        Create a passphrase entry window and get the passphrase, or not
+        """
         win = GtkPassphraseEntryWindow(
             verify_passphrase_fn=self.keepassxc_db.verify_and_set_passphrase,
             icon_file=os.path.join(
@@ -252,7 +215,8 @@ def read_verify_passphrase(self) -> None:
             ),
         )
 
-        from threading import Thread
+        # Activate the passphrase entry window from a separate thread
+        # using the new looped function, not Timer
         Thread(target=activate_passphrase_window).start()
 
         win.read_passphrase()
@@ -260,7 +224,6 @@ def read_verify_passphrase(self) -> None:
             Notify.Notification.new("KeePassXC database unlocked.").show()
 
 
-# pylint: disable=too-few-public-methods
 class PreferencesUpdateEventListener(EventListener):
     """ Handle preferences updates """
 
@@ -270,9 +233,6 @@ class PreferencesUpdateEventListener(EventListener):
     def on_event(self, event, extension) -> None:
         if event.new_value != event.old_value:
             if event.id == "database-path":
-                # REORG: only call keepassxc
-                # Pass "database_id" that will allow us to add multiple dbs
-                # keepassxc would store databases in a dict
                 self.keepassxc_db.change_path(event.new_value)
                 extension.database_path_changed()
             elif event.id == "inactivity-lock-timeout":
