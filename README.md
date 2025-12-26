@@ -1,121 +1,93 @@
-# ulauncher-keepassxc
+# ulauncher-keepassxc (Modernized & Hardened)
 
-A [Ulauncher](https://ulauncher.io/) extension to search your [KeePassXC](https://keepassxc.org/) password manager database and copy passwords to the clipboard.
+A **Ulauncher** extension to search your **KeePassXC** password manager database.
 
-## Features
+> ⚠️ **Note:** This is a heavily modernized fork of the original extension. It focuses on **security, stability, and advanced automation features** like Autotype and TOTP support. It fixes long-standing issues like silent failures and insecure memory handling.
 
-- Quickly search through the database entries by name, and copy passwords/usernames/URLs to the clipboard
-- Work with any file (.kdbx etc) that can be accessed by the KeePassXC itself via the `keepassxc-cli` command line tool
-- Support files locked with a passphrase. The extension asks for the passphrase and stores it in memory for a configurable amount of time
-- Doesn't require the KeePassXC app to be running
+## ✨ Features
 
-## Requirements
+### 🚀 Automation & Productivity
+* **Autotype Support:** Types your credentials directly into the previous window using `xdotool`.
+  * Supports: **Password**, **Username**, **URL**, and **TOTP**.
+  * *Security:* Keystrokes are piped via STDIN to prevent leakage in process lists (`ps aux`).
+* **TOTP Support:** Displays, copies, and types Time-based One-Time Passwords directly from Ulauncher.
+* **Smart Actions:** Separate actions for "Type" (Autotype) and "Copy" (Clipboard) for granular control.
 
-- Install a recent version of [KeePassXC](https://keepassxc.org/download/) (tested with 2.4.3, 2.5.0 and 2.6.6)
-- Make sure you can execute `keepassxc-cli` in a terminal without errors
+### 🛡️ Security & Hardening
+* **Secure Clipboard:** Uses `keepassxc-cli clip` to copy passwords.
+  * The clipboard is **automatically cleared** by the KeePassXC process after a timeout (default: 10s).
+  * No sensitive data remains in your clipboard history manager.
+* **Active Memory Wiper:** Passwords are actively wiped from RAM when the inactivity timer expires, rather than relying on Python's garbage collector.
+* **Robust Window Handling:** Replaces flaky "sleep timers" with an active polling mechanism to ensure the passphrase window actually receives focus.
 
-## Installation
+## 📦 Requirements
 
-Open Ulauncher preferences window -> Extensions -> "Add extension" and paste the following url:
+To use the full feature set (especially Autotype and Secure Clipboard), you need the following system packages installed.
 
-```
-https://github.com/pbkhrv/ulauncher-keepassxc
-```
+| Package | Reason | Command (Debian/Ubuntu) |
+| :--- | :--- | :--- |
+| **KeePassXC** | The core application (v2.7+ recommended). | `sudo apt install keepassxc` |
+| **wmctrl** | Required to bring the passphrase prompt to the foreground. | `sudo apt install wmctrl` |
+| **xdotool** | **Required for Autotype** (simulates keystrokes). | `sudo apt install xdotool` |
+| **xclip** (or `xsel`) | **Required for Secure Clipboard** (clearing). | `sudo apt install xclip` |
 
-## Configuration
+## 🔧 Installation
 
-- `Password database location`: path to the password database file that you want to access through Ulauncher. *This is the only preference that you need to set before you can use the extension.*
+1.  Open Ulauncher preferences window.
+2.  Go to **Extensions** -> **"Add extension"**.
+3.  Paste the URL of this repository:
+    ```
+    [(https://github.com/DarkMatteria90/ulauncher-keepassxc/)]
+    ```
 
-- `Inactivity lock timeout`: forces you to re-enter the passphrase after you haven't used the extension for a while. By default it's set to 600 seconds (10 minutes). If you'd rather not re-enter it, you can set the value to 0, but that's probably not a great idea. NOTE: The cached passphrase is only stored in memory, so you'll need to re-enter it if you reboot your computer or restart Ulauncher.
+## ⚙️ Configuration
 
-## Usage
+| Preference | Description | Default |
+| :--- | :--- | :--- |
+| **Password database location** | Path to your `.kdbx` file. | - |
+| **Inactivity lock timeout** | Time in seconds before the extension locks and **wipes the passphrase from memory**. Set to `0` to disable (not recommended). | `600` (10 min) |
+| **Max results** | Maximum number of search results to display. | `5` |
 
-Open Ulauncher and type in "kp " to start the extension. If your password database is locked with a passphrase, it'll ask you to enter it:
+## ⌨️ Usage
 
-![Unlock Database](images/screenshots/unlock-database.png)
+1.  **Open Ulauncher** and type `kp ` (or your configured keyword).
+2.  **Unlock:** If the database is locked, a window will appear asking for your master password.
+3.  **Search:** Type to find entries (e.g., `github`).
+4.  **Action:** Select an entry to see the available options:
 
-Once unlocked, search the database for Github logins:
+### Available Actions per Entry:
+* **⌨️ Type Password / Username / URL:**
+  * Uses Autotype to insert the text into the *last active window*.
+  * *Tip:* Great for login forms where you don't want to copy-paste.
+* **⏱️ Type TOTP:**
+  * Types the current 2-Factor Authentication code.
+* **📋 Copy [Attribute] (Secure):**
+  * Copies the Password, Username, URL, or TOTP to the clipboard.
+  * **Auto-Clears** after 10 seconds.
 
-![Search](images/screenshots/search1.png)
+## 🛠 Troubleshooting
 
-Look at the `Github work` entry:
+**The passphrase window doesn't appear / focus?**
+* Ensure `wmctrl` is installed.
+* Note: Wayland compositors might restrict window focus stealing.
 
-![Entry details](images/screenshots/details1.png)
+**Clipboard is empty after "Success" notification?**
+* Ensure `xclip` or `xsel` is installed. `keepassxc-cli` fails silently if no clipboard tool is available on Linux.
 
-## Troubleshooting
+**Autotype types into the wrong window?**
+* Autotype waits `0.5s` for Ulauncher to close. If your system is under heavy load, the focus might not switch back in time.
 
-### Why doesn't the passphrase window come to the foreground when it's asking me to unlock the database?
+## 👨‍💻 Development
 
-Please install [wmctrl](http://tripie.sweb.cz/utils/wmctrl/) - it's a utility that ulauncher-keepassxc calls to "activate" the passphrase window and bring it to the top:
+I use the following tools for this modernized version:
+* **Formatting:** `black`
+* **Linting:** `pylint`, `flake8`
+* **Type Checking:** `mypy`
 
-**Ubuntu and Debian**
-
-```shell
-sudo apt-get install wmctrl
-```
-
-## Development
-
-I use the following tools while working on this extension:
-
-- [`Black`](https://github.com/psf/black) code formatter
-- `pytest`
-- `pylint` with the `flake8` plugin
-- `mypy` static type checker
-
-You can install them in one shot (except for `Black` - that's up to you) by running:
-
-```shell
+**Install dev dependencies:**
+```bash
 pip install -r scripts/requirements.txt
 ```
-
-Check PEP8 compliance, perform static type analysis and run unit tests:
-
-```shell
-make test
-```
-
-Backup the "production" version of the extension and symlink the development version into Ulauncher's extension directory:
-
-```shell
-make symlink
-```
-
-Quit Ulauncher. Then run it in debug mode:
-
-```shell
-make run_ul
-```
-
-Run extension in the terminal, connect it to Ulauncher in debug mode:
-
-```shell
-make run
-```
-
-(if that doesn't work, check the connection string URL printed out by Ulauncher and modify the Makefile accordingly.)
-
-Unlink the development version of the extension from Ulauncher and replace it with whatever was there before:
-
-```shell
-make unlink
-```
-
-## Contributions
-
-Issues and pull requests are welcome!
-
-
-## Inspiration and thanks
-
-I loved Alfred on MacOS, and now I love Ulauncher on Linux. The Python API is a joy to work with.
-
-Thanks to [pass-ulauncher](https://github.com/yannishuber/pass-ulauncher) for the overall structure and for teaching me a few things about the API. I aaaalmost switched away from KeePassXC to [pass: the standard unix password manager](https://www.passwordstore.org/) because of it.
-
-[The Noun Project](https://thenounproject.com/) for the icons - there's nothing else quite like it.
-
-Finally, thanks to [KeePassXC](https://keepassxc.org/) on Linux and [KyPass](https://www.kyuran.be/software/kypass/) on iOS.
-
-## License
+## 📜 License
 
 MIT license. See [LICENSE](LICENSE) file for details.
