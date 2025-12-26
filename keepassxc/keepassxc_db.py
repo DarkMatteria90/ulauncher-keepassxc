@@ -85,7 +85,7 @@ class KeepassxcDatabase:
         self._reset_lock_timer()
         return True
 
-    def run_cli(self, *args) -> Tuple[str, str]:
+def run_cli(self, *args) -> Tuple[str, str]:
         """
         Execute the KeePassXC CLI with given args, parse output and handle errors
         """
@@ -94,14 +94,27 @@ class KeepassxcDatabase:
                 [self.cli, *args],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                input=bytes(self.passphrase, "utf-8") if self.passphrase else None, # Safety check
+                input=bytes(self.passphrase, "utf-8") if self.passphrase else None,
                 check=False,
             )
         except OSError:
             raise KeepassxcCliNotFoundError()
 
+        stderr = proc.stderr.decode("utf-8")
+        stdout = proc.stdout.decode("utf-8")
+
+        if proc.returncode != 0 and not stderr:
+            stderr = f"Process failed with exit code {proc.returncode}"
+
+        if self.inactivity_lock_timeout and self.passphrase:
+
+             pass 
+             
 
         if self.passphrase:
-             self._reset_lock_timer()
+            try:
+                self._reset_lock_timer()
+            except AttributeError:
+                pass 
 
-        return (proc.stderr.decode("utf-8"), proc.stdout.decode("utf-8"))
+        return (stderr, stdout)
