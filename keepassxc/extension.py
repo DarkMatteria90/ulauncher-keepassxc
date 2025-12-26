@@ -4,9 +4,9 @@ Search KeePassXC password databases and copy passwords to the clipboard.
 import logging
 import os
 import sys
-import time  # <--- FIX: Added
-import subprocess
-from threading import Thread # <--- FIX: Added (statt Timer für window activation)
+import time
+import subprocess  # Wichtig für xdotool
+from threading import Thread
 from typing import Optional
 import gi
 from ulauncher.api.client.Extension import Extension
@@ -46,43 +46,40 @@ def activate_passphrase_window() -> None:
     max_retries = 20
     for _ in range(max_retries):
         try:
-            # Versuch das Fenster zu finden
             activate_window_by_class_name("main.py.KeePassXC Search")
-            # Wenn erfolgreich (kein Fehler), brechen wir ab (oder machen weiter, sicherheitshalber)
         except WmctrlNotFoundError:
             logger.warning(
                 "wmctrl not installed, unable to activate passphrase entry window"
             )
             return
         except Exception:
-            pass # Fenster noch nicht da, wir warten kurz
+            pass
         
         time.sleep(0.1)
 
-def perform_autotype(username: str, password: str) -> None:
+
+def perform_type_text(text: str) -> None:
     """
-    Waits for Ulauncher to close, then types credentials using xdotool.
-    Uses stdin for password to avoid leaking it in process list (ps aux).
+    Waits for Ulauncher to close, then types the text using xdotool.
+    Uses stdin for safety.
     """
+    time.sleep(0.5) # Warte auf Fokus-Wechsel
 
-    time.sleep(0.5)
+    if not text:
+        return
 
-    if username:
-        subprocess.run(["xdotool", "type", "--clearmodifiers", username], check=False)
-    
-    subprocess.run(["xdotool", "key", "Tab"], check=False)
+    try:
+        # --clearmodifiers verhindert, dass 'Shift' oder 'Alt' hängen bleiben
+        proc = subprocess.Popen(
+            ["xdotool", "type", "--clearmodifiers", "--file", "-"], 
+            stdin=subprocess.PIPE
+        )
+        proc.communicate(input=text.encode('utf-8'))
+    except Exception as e:
+        logger.error(f"Typing failed: {e}")
+        # Notfalls via Notify, falls xdotool fehlt
+        # Notify.Notification.new(f"Typing failed: {e}").show()
 
-    if password:
-        try:
-            proc = subprocess.Popen(
-                ["xdotool", "type", "--clearmodifiers", "--file", "-"], 
-                stdin=subprocess.PIPE
-            )
-            proc.communicate(input=password.encode('utf-8'))
-        except Exception as e:
-            logger.error(f"Autotype failed: {e}")
-
-    subprocess.run(["xdotool", "key", "Return"], check=False)
 
 def current_script_path() -> str:
     """
@@ -185,8 +182,13 @@ class KeywordQueryEventListener(EventListener):
             return render.ask_to_enter_query()
 
         if extension.check_and_reset_active_entry(query_keyword, query_arg):
-            details = self.keepassxc_db.get_entry_details(query_arg)
-            return render.active_entry(query_arg, details)
+            # Details holen, damit render.py die Felder kennt
+            try:
+                details = self.keepassxc_db.get_entry_details(query_arg)
+                return render.active_entry(query_arg, details)
+            except Exception:
+                 # Fallback falls DB locked oder Fehler
+                 return render.keepassxc_cli_error("Could not fetch details")
 
         prev_query_arg = extension.check_and_reset_search_restore(query_arg)
         if prev_query_arg:
@@ -209,39 +211,38 @@ class ItemEnterEventListener(EventListener):
             data = event.get_data()
             action = data.get("action", None)
 
-            # --- AUTOTYPE LOGIK ---
-            if action == "autotype":
+            # --- TYPE FIELD LOGIK (Einzelne Felder tippen) ---
+            if action == "type_field":
                 entry = data.get("entry")
-                # Wir holen die Details frisch aus der DB (sicherer als sie im Event rumzureichen)
+                field_key = data.get("field") # 'Password', 'UserName', 'URL'
+                
                 try:
                     details = self.keepassxc_db.get_entry_details(entry)
-                    u = details.get("UserName", "")
-                    p = details.get("Password", "")
+                    val = details.get(field_key, "")
                     
-                    # Ab in den Hintergrund-Thread damit, sonst blockiert Ulauncher
-                    Thread(target=perform_autotype, args=(u, p)).start()
-                    
-                    # Ulauncher schließen
-                    return DoNothingAction()
-                    
+                    if val:
+                        Thread(target=perform_type_text, args=(val,)).start()
+                        return DoNothingAction()
+                    else:
+                        Notify.Notification.new(f"Field {field_key} is empty").show()
+                        return DoNothingAction()
+
                 except Exception as e:
                     Notify.Notification.new(f"Autotype failed: {e}").show()
                     return DoNothingAction()
-            # ----------------------
+            # ------------------------------------------------
 
-            # --- NEU START ---
             if action == "secure_copy":
                 entry = data.get("entry")
                 attr = data.get("attr", "password")
-                # Wir nehmen 10s oder was in den Settings steht
                 self.keepassxc_db.copy_to_clipboard(entry, attr, timeout=20)
                 Notify.Notification.new(f"{attr.capitalize()} copied. Clears in 20s.").show()
                 return DoNothingAction()
-            # --- NEU ENDE ---
 
             if action == "read_passphrase":
                 self.read_verify_passphrase()
                 return DoNothingAction()
+
             if action == "activate_entry":
                 keyword = data.get("keyword", None)
                 entry = data.get("entry", None)
@@ -250,8 +251,10 @@ class ItemEnterEventListener(EventListener):
                 extension.set_active_entry_search_restore(entry, prev_query_arg)
                 extension.add_recent_active_entry(entry)
                 return SetUserQueryAction("{} {}".format(keyword, entry))
+
             if action == "show_notification":
                 Notify.Notification.new(data.get("summary")).show()
+
         except KeepassxcCliNotFoundError:
             return render.cli_not_found_error()
         except KeepassxcFileNotFoundError:
@@ -270,9 +273,6 @@ class ItemEnterEventListener(EventListener):
                 current_script_path(), "images/keepassxc-search.svg"
             ),
         )
-
-        # Activate the passphrase entry window from a separate thread
-        # using the new looped function, not Timer
         Thread(target=activate_passphrase_window).start()
 
         win.read_passphrase()
